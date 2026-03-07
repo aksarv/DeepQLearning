@@ -148,6 +148,7 @@ class DeepQ
                 }
                 double loss = action_value.Fit(inputs, action_value_output);
                 Console.WriteLine(loss);
+                target_update_count -= 1;
                 if (target_update_count == 0)
                 {
                     target_action_value = action_value.Clone();
