@@ -13,6 +13,7 @@ class DeepQ
     public double epsilon_end;
     public double epsilon_decay;
     public int steps;
+    public int cycles;
     public DeepQ(int no_inputs, int no_outputs, int no_hidden=64) {
         action_value = new Network(no_inputs, no_hidden, no_outputs);
         target_action_value = action_value.Clone();
@@ -20,16 +21,19 @@ class DeepQ
         discount_factor = 0.99;
         batch_size = 32;
         replay_memory_size = 1000;
-        target_update = 10;
+        target_update = 1000;
         epsilon_start = 1;
         epsilon_end = 0.1;
-        epsilon_decay = 0.999;
-        steps = 100000;
+        epsilon_decay = 0.9999;
+        steps = 1;
+        cycles = 200;
     }
 
-    public void Train(Game game)
+    public void Train(bool short_train=true)
     {
+        Game game = new();
         int target_update_count = target_update;
+        int cycle_count = 0;
         double epsilon = epsilon_start;
         List<(double[], double[], double, bool, int)> replay_memory = new();
         List<List<int>> actions = new List<List<int>>
@@ -46,6 +50,7 @@ class DeepQ
             while (true)
             {
                 int dx, dy, action;
+                // With a probability epsilon, choose a random action, otherwise choose the best according to the action value network
                 if (rnd.NextDouble() < epsilon)
                 {
                     action = rnd.Next(4);
@@ -79,10 +84,12 @@ class DeepQ
                     break;
                 }
                 double[] next_state = Game.GetBitboard(board);
+                // Add the experience to replay memory
                 if (replay_memory.Count < replay_memory_size)
                 {
                     replay_memory.Add((curr_state, next_state, reward, terminal, action));   
                 }
+                // Sample a minibatch of experiences from the replay memory
                 List<(double[], double[], double, bool, int)> mini_batch = new();
                 List<int> used_indices = new();
                 if (replay_memory.Count > batch_size)
@@ -103,10 +110,11 @@ class DeepQ
                         mini_batch.Add(replay_memory[i]);
                     }
                 }
-                double[] ys = new double[batch_size];
-                int[] acts = new int[batch_size];
-                double[,] inputs = new double[batch_size, mini_batch[0].Item1.Length];
-                for (int j = 0; j < batch_size; j++)
+                double[] ys = new double[mini_batch.Count];
+                int[] acts = new int[mini_batch.Count];
+                double[,] inputs = new double[mini_batch.Count, mini_batch[0].Item1.Length];
+                // Calculate the reward, factoring in the immediate reward but also anticipated further rewards as given by the target action value network
+                for (int j = 0; j < mini_batch.Count; j++)
                 {
                     double[] curr, next;
                     double rwd;
@@ -139,22 +147,61 @@ class DeepQ
                     }
                     acts[j] = act;
                 }
+                // Gradient descent on the action value network compared to the rewards, but only considering the loss with respect to the output node of the action taken
                 double[,] action_value_output = action_value.Predict(inputs).matrix;
-                for (int i = 0; i < batch_size; i++)
+                for (int i = 0; i < mini_batch.Count; i++)
                 {
                     int a = acts[i];
                     double y = ys[i];
                     action_value_output[i, a] = y;
                 }
                 double loss = action_value.Fit(inputs, action_value_output);
-                Console.WriteLine(loss);
+                Console.WriteLine(Convert.ToString(step + 1) + "/" + Convert.ToString(steps) + " | " + Convert.ToString(target_update - target_update_count) + "/" + Convert.ToString(target_update) + " | " + Convert.ToString(cycle_count + 1) + "/" + Convert.ToString(cycles) + " | " + Convert.ToString(loss));
                 target_update_count -= 1;
                 if (target_update_count == 0)
                 {
+                    cycle_count += 1;
+                    if (cycle_count >= cycles)
+                    {
+                        break;
+                    }
                     target_action_value = action_value.Clone();
                     target_update_count = target_update;
+                    if (short_train)
+                    {
+                        break;
+                    }
                 }
             }
         }
+    }
+
+    public (int, int) BestAction(Game game)
+    {
+        // Get the best next action
+        double[] state = game.GetState();
+        double[,] state_wrap = new double[1, state.Length];
+        for (int i = 0; i < state.Length; i++)
+        {
+            state_wrap[0, i] = state[i];
+        }
+        double[,] q_values_wrap = action_value.Predict(state_wrap).matrix;
+        double[] q_values = new double[q_values_wrap.GetLength(1)];
+        for (int i = 0; i < q_values_wrap.GetLength(1); i++)
+        {
+            q_values[i] = q_values_wrap[0, i];
+        }
+        int action = Array.IndexOf(q_values, q_values.Max());
+        List<List<int>> actions = new List<List<int>>
+        {
+            new List<int> { 0, 1 },
+            new List<int> { 1, 0 },
+            new List<int> { 0, -1 },
+            new List<int> { -1, 0 }
+        };
+        int dx, dy;
+        dx = actions[action][0];
+        dy = actions[action][1];
+        return (dx, dy);
     }
 }
