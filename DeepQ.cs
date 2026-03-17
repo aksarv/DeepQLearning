@@ -148,6 +148,7 @@ class DeepQ
                     acts[j] = act;
                 }
                 // Gradient descent on the action value network compared to the rewards, but only considering the loss with respect to the output node of the action taken
+                // To do this we make all other output values for each batch the same as action value output so MSE on them gives 0
                 double[,] action_value_output = action_value.Predict(inputs).matrix;
                 for (int i = 0; i < mini_batch.Count; i++)
                 {
